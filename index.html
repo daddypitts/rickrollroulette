@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Rickroll Roulette v2.5.5</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            text-align: center;
+            font-family: Arial, sans-serif;
+            padding: 10px;
+        }
+        .hidden { display: none !important; }
+        #playerList { margin-top: 10px; }
+        .rickrolled { color: red; text-decoration: line-through;}
+		.eliminated { color: red; text-decoration: line-through;}
+        .immunity { color: green; font-weight: bold;}
+        .goldenBullet { color: gold; font-weight: bold;}
+        #leaderboardContainer {
+            margin-top: 30px;
+            max-width: 300px;
+            text-align: left;
+            border: 1px solid #ccc;
+            padding: 10px;
+            border-radius: 8px;
+            background: #f9f9f9;
+        }
+        #leaderboardContainer h2 { margin-top: 0; font-size: 1.2em; }
+        #leaderboardList { list-style-type: none; padding-left: 0; margin-bottom: 10px; }
+        #leaderboardList li { padding: 4px 0; border-bottom: 1px solid #ddd; }
+        #leaderboardList li:last-child { border-bottom: none; }
+        #overlay {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            background: rgba(0,0,0,0.5);
+            color: white;
+            font-size: 3em;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        #rickrollOverlay {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            background: rgba(50,50,50,0.7);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+        }
+        #rickrollVideo {
+            width: 60%;
+            max-width: 600px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px #000;
+        }
+        #closeRickrollBtn {
+            margin-top: 15px;
+            padding: 10px 20px;
+            font-size: 1.2em;
+            border: none;
+            border-radius: 6px;
+            background: #ff4d4d;
+            color: white;
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        #timeElapsed {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            background: #222;
+            color: #eee;
+            padding: 6px 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 14px;
+            z-index: 1100;
+        }
+
+        @keyframes glow {
+            0% { text-shadow: 0 0 5px gold; }
+            50% { text-shadow: 0 0 20px gold; }
+            100% { text-shadow: 0 0 5px gold; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Menu -->
+    <div id="menu">
+        <h1>Rickroll Roulette v2.5.5</h1>
+        <p>Select the number of players:</p>
+        <select id="playerCount">
+            <option value="2">2 Players</option>
+            <option value="3">3 Players</option>
+            <option value="4">4 Players</option>
+            <option value="5">5 Players</option>
+            <option value="6">6 Players</option>
+            <option value="10">10 Players</option>
+            <option value="12">12 Players</option>
+        </select>
+        <button onclick="startGame()">Start Game</button>
+        <button id="soundToggleButton" onclick="toggleSound()">Mute Sounds</button>
+    </div>
+
+    <!-- Name Entry -->
+    <div id="nameEntry" class="hidden">
+        <h1>Rickroll Roulette v2.5.5</h1>
+        <h3>Enter Player Names</h3>
+        <div id="playerList"></div>
+        <button onclick="confirmNames()">Confirm</button>
+    </div>
+
+    <!-- Game Screen -->
+    <div id="game" class="hidden">
+        <h1>Rickroll Roulette v2.5.5</h1>
+        <p id="status"></p>
+        <div id="playerDisplay"></div>
+        <button id="spinButton" onclick="playGame()">Spin the Chamber</button>
+        <button id="nextButton" class="hidden" onclick="nextTurn()">Next Turn</button>
+        <button id="backToMenuButton" class="hidden" onclick="goToMenu()">Back to Menu</button>
+        <div id="eventKey" class="hidden">
+			<p><h5><span class="eliminated">Eliminated</span>  - Player is eliminated from the game</p>
+            <p><span class="goldenBullet">Golden Bullet</span> - Player Rickrolls everyone else and wins immediately. <span class="goldenBullet">(~5%)</span></p> 
+			<p><span class="immunity">Immunity</span> - Player can not be Rickrolled next round. <span class="immunity">(~16%)</h5></span</p>
+        </div>
+    </div>
+	
+    <!-- Leaderboard -->
+    <div id="leaderboardContainer">
+        <h2>Leaderboard - Most Wins (Top 5)</h2>
+        <ul id="leaderboardList"></ul>
+        <button onclick="resetLeaderboard()">Reset Leaderboard</button>
+    </div>
+
+    <!-- Countdown Overlay -->
+    <div id="overlay" class="hidden">
+        <div id="countdownText"></div>
+    </div>
+
+    <!-- Rickroll Overlay -->
+    <div id="rickrollOverlay" class="hidden">
+        <video id="rickrollVideo" autoplay>
+            <source src="Rick Roll.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+        <button id="closeRickrollBtn" onclick="closeRickroll()" disabled>Close (10)</button>
+    </div>
+
+    <div id="timeElapsed">Time Elapsed: 0s</div>
+
+    <script>
+        let gameStartTime=null, elapsedTimerInterval=null, elapsedSeconds=0;
+        let currentPlayerIndex=0, round=1, odds=6;
+        let activePlayers=[], rickrolledPlayers=[], playerNicknames=[], immunityPlayers=[], immunityRounds={};
+        const immunityChance = 0.16;
+        const goldenBulletChance = 0.05;
+        const dryFireSound=new Audio('https://www.fesliyanstudios.com/play-mp3/387');
+        const gunshotSound=new Audio('https://www.fesliyanstudios.com/play-mp3/7122');
+        const levelUpSound=new Audio('https://www.fesliyanstudios.com/play-mp3/7159');
+        const explosionSound=new Audio('funny sound.mp3'); 
+        let isMuted=false;
+
+        function startGame() {
+            playerNicknames=[]; activePlayers=[]; rickrolledPlayers=[]; immunityPlayers=[]; immunityRounds={};
+            currentPlayerIndex=0; round=1; odds=6;
+            document.getElementById("playerList").innerHTML=""; document.getElementById("playerDisplay").innerHTML="";
+            document.getElementById("status").innerText="";
+            document.getElementById("spinButton").classList.remove("hidden");
+            document.getElementById("nextButton").classList.add("hidden");
+            document.getElementById("backToMenuButton").classList.add("hidden");
+            document.getElementById("eventKey").classList.remove("hidden");
+
+            const numPlayers=parseInt(document.getElementById("playerCount").value);
+            let container=document.getElementById("playerList");
+            for(let i=0;i<numPlayers;i++){
+                let input=document.createElement("input");
+                input.type="text"; input.placeholder="Player "+(i+1); input.id="playerName"+i;
+                container.appendChild(input); container.appendChild(document.createElement("br"));
+            }
+            document.getElementById("menu").classList.add("hidden");
+            document.getElementById("nameEntry").classList.remove("hidden");
+        }
+
+        function confirmNames() {
+            let container=document.getElementById("playerDisplay");
+            container.innerHTML=""; activePlayers=[]; playerNicknames=[];
+            const numPlayers=document.getElementById("playerList").children.length/2;
+            for(let i=0;i<numPlayers;i++){
+                let nickname=document.getElementById("playerName"+i).value || "Player "+(i+1);
+                playerNicknames.push(nickname); activePlayers.push(i);
+                let p=document.createElement("p"); p.id="player"+i; p.textContent=nickname; container.appendChild(p);
+            }
+            currentPlayerIndex=0; round=1; odds=6; rickrolledPlayers=[];
+            document.getElementById("nameEntry").classList.add("hidden");
+            document.getElementById("game").classList.remove("hidden");
+            updateStatus(); startElapsedTimer();
+        }
+
+        function playGame() {
+            if(activePlayers.length===1){
+                const winner=playerNicknames[activePlayers[0]];
+                document.getElementById("status").innerText=winner+" wins!";
+                updateLeaderboard(winner);
+                stopElapsedTimer();
+                document.getElementById("spinButton").classList.add("hidden");
+                document.getElementById("nextButton").classList.add("hidden");
+                document.getElementById("backToMenuButton").classList.remove("hidden");
+                return;
+            }
+
+            if(immunityPlayers.includes(activePlayers[currentPlayerIndex])){
+                if(round===immunityRounds[activePlayers[currentPlayerIndex]]+1){
+                    immunityPlayers = immunityPlayers.filter(p => p !== activePlayers[currentPlayerIndex]);
+                    document.getElementById("player"+activePlayers[currentPlayerIndex]).classList.remove("immunity");
+                }
+                updateStatus(); 
+                startCountdown(3.5);
+                return;
+            }
+
+            if(Math.random() < goldenBulletChance){
+                const winnerIndex = activePlayers[currentPlayerIndex];
+                const winnerName = playerNicknames[winnerIndex];
+
+                // Explosion plays immediately
+                if(!isMuted) explosionSound.play();
+
+                // Mark everyone else as rickrolled
+                activePlayers.forEach(p => { 
+                    if(p!==winnerIndex) document.getElementById("player"+p).classList.add("rickrolled"); 
+                });
+
+                // Mark winner as golden bullet
+                const winnerElement = document.getElementById("player"+winnerIndex);
+                winnerElement.classList.add("goldenBullet");
+                winnerElement.style.animation = "glow 1s infinite alternate";
+
+                // Show rickroll overlay for everyone else (mandatory)
+                document.getElementById("status").innerText = winnerName + " got the Golden Bullet!";
+                showRickroll();
+
+                updateLeaderboard(winnerName);
+                stopElapsedTimer();
+                document.getElementById("spinButton").classList.add("hidden");
+                document.getElementById("nextButton").classList.add("hidden");
+                document.getElementById("backToMenuButton").classList.remove("hidden");
+                return;
+            }
+
+            let immunityRoll = Math.random();
+            if(immunityRoll < immunityChance && !immunityPlayers.includes(activePlayers[currentPlayerIndex])){
+                immunityPlayers.push(activePlayers[currentPlayerIndex]);
+                immunityRounds[activePlayers[currentPlayerIndex]] = round;
+                document.getElementById("player"+activePlayers[currentPlayerIndex]).classList.add("immunity");
+                document.getElementById("status").innerText = playerNicknames[activePlayers[currentPlayerIndex]] + " got immunity!";
+                if(!isMuted) levelUpSound.play();
+                setTimeout(()=>{ startCountdown(3.5); },1000);
+                return;
+            }
+
+            let roll = Math.floor(Math.random()*odds) + 1;
+            if(roll === 1){
+                if(!isMuted) gunshotSound.play();
+                let rickrolledPlayer = activePlayers[currentPlayerIndex];
+                document.getElementById("player"+rickrolledPlayer).classList.add("rickrolled");
+                document.getElementById("status").innerText = playerNicknames[rickrolledPlayer] + " got Rickrolled!";
+                rickrolledPlayers.push(rickrolledPlayer);
+                activePlayers.splice(currentPlayerIndex,1);
+                setTimeout(showRickroll,500);
+
+                if(activePlayers.length === 1){
+                    const winner = playerNicknames[activePlayers[0]];
+                    document.getElementById("status").innerText = winner + " wins!";
+                    updateLeaderboard(winner);
+                    stopElapsedTimer();
+                    document.getElementById("spinButton").classList.add("hidden");
+                    document.getElementById("nextButton").classList.add("hidden");
+                    document.getElementById("backToMenuButton").classList.remove("hidden");
+                }
+                return;
+            }
+
+            if(!isMuted) dryFireSound.play();
+            startCountdown(3.5);
+        }
+
+        function showRickroll(){
+            const overlay = document.getElementById("rickrollOverlay");
+            const video = document.getElementById("rickrollVideo");
+            const btn = document.getElementById("closeRickrollBtn");
+
+            video.currentTime = 0;
+            video.play();
+            overlay.classList.remove("hidden");
+
+            let countdown = 10;
+            btn.disabled = true;
+            btn.style.opacity = 0.5;
+            btn.style.cursor = "not-allowed";
+            btn.textContent = `Close (${countdown})`;
+
+            const interval = setInterval(() => {
+                countdown--;
+                if(countdown > 0){
+                    btn.textContent = `Close (${countdown})`;
+                } else {
+                    clearInterval(interval);
+                    btn.disabled = false;
+                    btn.style.opacity = 1;
+                    btn.style.cursor = "pointer";
+                    btn.textContent = "Close";
+                }
+            }, 1000);
+        }
+
+        function closeRickroll(){
+            const overlay = document.getElementById("rickrollOverlay");
+            const video = document.getElementById("rickrollVideo");
+            video.pause();
+            overlay.classList.add("hidden");
+        }
+
+        function startCountdown(seconds){
+            const overlay=document.getElementById("overlay");
+            const countdownText=document.getElementById("countdownText");
+            const spinButton=document.getElementById("spinButton");
+            spinButton.disabled=true;
+            overlay.classList.remove("hidden");
+            let timeLeft=seconds;
+            countdownText.innerText=timeLeft.toFixed(1);
+            const interval=setInterval(()=>{
+                timeLeft-=0.1;
+                if(timeLeft<=0){
+                    clearInterval(interval);
+                    overlay.classList.add("hidden");
+                    spinButton.disabled=false;
+                    nextTurn();
+                } else {
+                    countdownText.innerText=timeLeft.toFixed(1);
+                }
+            },100);
+        }
+
+        function nextTurn(){
+            currentPlayerIndex=(currentPlayerIndex+1)%activePlayers.length;
+            if(currentPlayerIndex===0){ round++; odds--; if(odds<1) odds=1; }
+            updateStatus();
+            document.getElementById("spinButton").classList.remove("hidden");
+            document.getElementById("nextButton").classList.add("hidden");
+        }
+
+        function updateStatus(){
+            if(activePlayers.length>0){
+                document.getElementById("status").innerText = "Round: "+round+" | "+playerNicknames[activePlayers[currentPlayerIndex]]+"'s turn";
+            }
+        }
+
+        function goToMenu(){
+            document.getElementById("spinButton").classList.remove("hidden");
+            document.getElementById("nextButton").classList.add("hidden");
+            document.getElementById("backToMenuButton").classList.add("hidden");
+            document.getElementById("eventKey").classList.add("hidden");
+            document.getElementById("game").classList.add("hidden");
+            document.getElementById("menu").classList.remove("hidden");
+        }
+
+        function loadLeaderboard(){ const data=localStorage.getItem("rickrollLeaderboard"); return data?JSON.parse(data):{}; }
+        function saveLeaderboard(lb){ localStorage.setItem("rickrollLeaderboard",JSON.stringify(lb)); }
+        function updateLeaderboard(winner){ let lb=loadLeaderboard(); lb[winner]?lb[winner]++:lb[winner]=1; saveLeaderboard(lb); renderLeaderboard(); }
+        function renderLeaderboard(){ const lb=loadLeaderboard(); const list=document.getElementById("leaderboardList"); list.innerHTML=""; const sorted=Object.entries(lb).sort((a,b)=>b[1]-a[1]); if(sorted.length===0){ list.innerHTML="<li>No wins yet.</li>"; return; } const topFive=sorted.slice(0,5); topFive.forEach(([name,wins])=>{ const li=document.createElement("li"); li.textContent=`${name}: ${wins} win${wins>1?"s":""}`; list.appendChild(li); }); }
+        function resetLeaderboard(){ localStorage.removeItem("rickrollLeaderboard"); renderLeaderboard(); }
+        window.onload=()=>{ renderLeaderboard(); }
+
+        function toggleSound(){ isMuted=!isMuted; document.getElementById("soundToggleButton").innerText=isMuted?"Unmute Sounds":"Mute Sounds"; }
+
+        function startElapsedTimer(){
+            gameStartTime=Date.now(); elapsedSeconds=0;
+            document.getElementById("timeElapsed").innerText="Time Elapsed: 0s";
+            if(elapsedTimerInterval) clearInterval(elapsedTimerInterval);
+            elapsedTimerInterval=setInterval(()=>{ elapsedSeconds++; document.getElementById("timeElapsed").innerText=`Time Elapsed: ${elapsedSeconds}s`; },1000);
+        }
+        function stopElapsedTimer(){ if(elapsedTimerInterval){ clearInterval(elapsedTimerInterval); elapsedTimerInterval=null; } }
+    </script>
+</body>
+</html>
